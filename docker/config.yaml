@@ -1,0 +1,287 @@
+# Climate-Alpha Configuration File
+
+# Data Configuration
+data:
+  sources:
+    - yahoo_finance
+    - alpha_vantage
+    - fred
+    - news_api
+  
+  universes:
+    renewable_energy:
+      - ICLN  # iShares Global Clean Energy ETF
+      - TAN   # Invesco Solar ETF
+      - QCLN  # First Trust NASDAQ Clean Edge
+      - PBW   # Invesco WilderHill Clean Energy
+      - FAN   # First Trust Global Wind Energy
+      - ACES  # ALPS Clean Energy ETF
+    
+    renewable_stocks:
+      - ENPH  # Enphase Energy
+      - SEDG  # SolarEdge
+      - FSLR  # First Solar
+      - RUN   # Sunrun
+      - NEE   # NextEra Energy
+      - BEP   # Brookfield Renewable Partners
+      - VWDRY # Vestas Wind Systems
+      - ORSTED.CO # Orsted
+    
+    traditional_energy:
+      - XLE   # Energy Select Sector SPDR
+      - XOP   # SPDR S&P Oil & Gas Exploration
+      - USO   # United States Oil Fund
+      - UNG   # United States Natural Gas Fund
+    
+    traditional_stocks:
+      - XOM   # Exxon Mobil
+      - CVX   # Chevron
+      - COP   # ConocoPhillips
+      - SLB   # Schlumberger
+  
+  update_schedule:
+    market_data: daily
+    news: hourly
+    esg_scores: weekly
+    fundamentals: quarterly
+
+# Strategy Configuration
+strategies:
+  pairs_trading:
+    enabled: true
+    lookback_period: 252
+    entry_zscore: 2.0
+    exit_zscore: 0.5
+    stop_loss_zscore: 3.5
+    position_size: 0.05
+    pairs:
+      - [ICLN, XLE]
+      - [TAN, XOP]
+      - [ENPH, XOM]
+      - [FSLR, CVX]
+  
+  factor_long_short:
+    enabled: true
+    factors:
+      - value
+      - momentum
+      - quality
+      - esg_score
+    rebalance_frequency: monthly
+    long_pct: 0.3
+    short_pct: 0.3
+    factor_weights:
+      value: 0.25
+      momentum: 0.25
+      quality: 0.25
+      esg_score: 0.25
+  
+  ml_momentum:
+    enabled: true
+    model: lstm_xgboost_ensemble
+    lookback_days: 60
+    prediction_horizon: 1
+    min_prediction_confidence: 0.6
+    position_size: 0.08
+  
+  vol_arbitrage:
+    enabled: true
+    min_vol_spread: 0.05
+    delta_hedge: true
+    rebalance_frequency: daily
+
+# Model Configuration
+models:
+  lstm:
+    input_days: 60
+    layers: [128, 64, 32]
+    dropout: 0.2
+    epochs: 100
+    batch_size: 32
+    learning_rate: 0.001
+  
+  xgboost:
+    n_estimators: 300
+    max_depth: 6
+    learning_rate: 0.05
+    subsample: 0.8
+    colsample_bytree: 0.8
+  
+  sentiment:
+    sources:
+      - bloomberg
+      - reuters
+      - twitter
+    sentiment_window: 7  # days
+    weight_decay: 0.95
+
+# Risk Management
+risk:
+  var:
+    confidence_levels: [0.95, 0.99]
+    methods: [historical, parametric, monte_carlo]
+    lookback_period: 252
+    mc_simulations: 10000
+  
+  position_limits:
+    max_single_position: 0.10
+    max_sector_exposure: 0.40
+    max_leverage: 1.5
+  
+  stop_loss:
+    individual_position: 0.15
+    daily_portfolio: 0.05
+    drawdown_limit: 0.20
+  
+  stress_testing:
+    scenarios:
+      - 2008_crisis
+      - covid_2020
+      - climate_2c
+      - climate_3c
+      - climate_4c
+      - carbon_tax_shock
+
+# Portfolio Optimization
+portfolio:
+  methods:
+    - mean_variance
+    - black_litterman
+    - risk_parity
+    - hierarchical_risk_parity
+  
+  constraints:
+    min_esg_score: 7.0
+    max_carbon_intensity: 100
+    min_renewable_exposure: 0.5
+  
+  rebalancing:
+    frequency: monthly
+    threshold: 0.05  # Rebalance if drift > 5%
+
+# Backtesting
+backtesting:
+  initial_capital: 1000000
+  commission: 0.001
+  slippage: 0.0005
+  benchmark: SPY
+  metrics:
+    - sharpe_ratio
+    - sortino_ratio
+    - calmar_ratio
+    - max_drawdown
+    - win_rate
+    - profit_factor
+    - information_ratio
+
+# Feature Engineering
+features:
+  technical:
+    - sma_20
+    - sma_50
+    - sma_200
+    - ema_12
+    - ema_26
+    - rsi_14
+    - macd
+    - bollinger_bands
+    - atr_14
+    - adx_14
+    - stochastic
+    - obv
+  
+  fundamental:
+    - pe_ratio
+    - pb_ratio
+    - dividend_yield
+    - roe
+    - debt_to_equity
+    - revenue_growth
+    - earnings_growth
+  
+  esg:
+    - esg_score
+    - environmental_score
+    - social_score
+    - governance_score
+    - carbon_intensity
+    - renewable_energy_pct
+  
+  macro:
+    - interest_rate
+    - inflation
+    - gdp_growth
+    - oil_price
+    - vix
+    - dollar_index
+
+# Logging
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: logs/climate_alpha.log
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+
+# IBM Watson
+ibm_watson:
+  ml:
+    instance_id: your_instance_id
+    deployment_space: your_space_id
+  
+  nlu:
+    version: 2022-04-07
+    features:
+      - sentiment
+      - entities
+      - keywords
+      - categories
+  
+  assistant:
+    version: 2023-06-15
+    skill_id: your_skill_id
+
+# Dashboard
+dashboard:
+  refresh_interval: 5  # seconds
+  charts:
+    - portfolio_value
+    - returns
+    - drawdown
+    - positions
+    - risk_metrics
+    - factor_exposures
+    - esg_scores
+    - sentiment
+  
+  alerts:
+    var_breach: true
+    drawdown_limit: true
+    position_limit: true
+    esg_threshold: true
+
+# API
+api:
+  version: v1
+  title: Climate-Alpha API
+  description: Quantitative ESG Trading Platform API
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 60
+  
+  cors:
+    enabled: true
+    origins: ["*"]
+
+# Database
+database:
+  pool_size: 10
+  max_overflow: 20
+  pool_timeout: 30
+  pool_recycle: 3600
+
+# Cache
+cache:
+  enabled: true
+  ttl: 300  # seconds
+  max_size: 1000

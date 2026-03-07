@@ -38,7 +38,10 @@ class PerformanceMetrics:
     
     def annualized_volatility(self) -> float:
         """Calculate annualized volatility"""
-        return self.returns.std() * np.sqrt(self.trading_days)
+        vol = self.returns.std() * np.sqrt(self.trading_days)
+        if isinstance(vol, pd.Series):
+            vol = vol.iloc[0]
+        return float(vol)
     
     def sharpe_ratio(self) -> float:
         """Calculate Sharpe ratio"""
@@ -50,33 +53,59 @@ class PerformanceMetrics:
         excess_returns = self.annualized_return() - self.risk_free_rate
         downside_returns = self.returns[self.returns < 0]
         downside_std = downside_returns.std() * np.sqrt(self.trading_days)
-        return excess_returns / downside_std if downside_std != 0 else 0
+        
+        # Ensure scalar
+        if isinstance(downside_std, pd.Series):
+            downside_std = downside_std.iloc[0]
+        downside_std = float(downside_std)
+        
+        return excess_returns / downside_std if downside_std != 0 else 0.0
     
     def calmar_ratio(self) -> float:
         """Calculate Calmar ratio (return / max drawdown)"""
         max_dd = self.max_drawdown()
-        return self.annualized_return() / abs(max_dd) if max_dd != 0 else 0
+        # max_dd is already a float from the fixed method
+        return self.annualized_return() / abs(max_dd) if abs(max_dd) > 1e-10 else 0.0
     
     def max_drawdown(self) -> float:
         """Calculate maximum drawdown"""
-        cumulative = (1 + self.returns).cumprod()
+        # Force clean Series
+        returns = pd.Series(self.returns.values)
+        
+        cumulative = (1 + returns).cumprod()
         running_max = cumulative.expanding().max()
         drawdown = (cumulative - running_max) / running_max
-        return drawdown.min()
+        max_dd = drawdown.min()
+        
+        if isinstance(max_dd, pd.Series):
+            max_dd = max_dd.iloc[0]
+        
+        return float(max_dd)
     
     def max_drawdown_duration(self) -> int:
         """Calculate maximum drawdown duration in days"""
-        cumulative = (1 + self.returns).cumprod()
+        # Force clean Series
+        returns = pd.Series(self.returns.values)
+        
+        cumulative = (1 + returns).cumprod()
         running_max = cumulative.expanding().max()
-        drawdown = (cumulative - running_max) / running_max
+        drawdown = (cumulative.values - running_max.values) / running_max.values
+        drawdown = pd.Series(drawdown)
         
-        # Find drawdown periods
-        is_drawdown = drawdown < 0
-        drawdown_periods = is_drawdown.astype(int).groupby(
-            (is_drawdown != is_drawdown.shift()).cumsum()
-        ).sum()
+        # Find drawdown periods using simple loop (avoid groupby)
+        is_in_drawdown = (drawdown < 0).astype(int).values
         
-        return drawdown_periods.max() if len(drawdown_periods) > 0 else 0
+        max_duration = 0
+        current_duration = 0
+        
+        for in_dd in is_in_drawdown:
+            if in_dd == 1:
+                current_duration += 1
+                max_duration = max(max_duration, current_duration)
+            else:
+                current_duration = 0
+        
+        return int(max_duration)
     
     def win_rate(self) -> float:
         """Calculate win rate (% of positive returns)"""
@@ -86,6 +115,16 @@ class PerformanceMetrics:
         """Calculate profit factor (gross profit / gross loss)"""
         gross_profit = self.returns[self.returns > 0].sum()
         gross_loss = abs(self.returns[self.returns < 0].sum())
+        
+        # Ensure scalars
+        if isinstance(gross_profit, pd.Series):
+            gross_profit = gross_profit.iloc[0]
+        if isinstance(gross_loss, pd.Series):
+            gross_loss = gross_loss.iloc[0]
+        
+        gross_profit = float(gross_profit)
+        gross_loss = float(gross_loss)
+        
         return gross_profit / gross_loss if gross_loss != 0 else np.inf
     
     def var(self, confidence: float = 0.95) -> float:
@@ -105,15 +144,27 @@ class PerformanceMetrics:
             confidence: Confidence level (default: 95%)
         """
         var = self.var(confidence)
-        return self.returns[self.returns <= var].mean()
+        tail_losses = self.returns[self.returns <= var]
+        cvar_val = tail_losses.mean()
+        
+        if isinstance(cvar_val, pd.Series):
+            cvar_val = cvar_val.iloc[0]
+        
+        return float(cvar_val) if not pd.isna(cvar_val) else 0.0
     
     def skewness(self) -> float:
         """Calculate return distribution skewness"""
-        return stats.skew(self.returns.dropna())
+        skew = stats.skew(self.returns.dropna())
+        if isinstance(skew, (pd.Series, np.ndarray)):
+            skew = float(skew.item() if hasattr(skew, 'item') else skew[0])
+        return float(skew)
     
     def kurtosis(self) -> float:
         """Calculate return distribution kurtosis"""
-        return stats.kurtosis(self.returns.dropna())
+        kurt = stats.kurtosis(self.returns.dropna())
+        if isinstance(kurt, (pd.Series, np.ndarray)):
+            kurt = float(kurt.item() if hasattr(kurt, 'item') else kurt[0])
+        return float(kurt)
     
     def beta(self) -> Optional[float]:
         """Calculate beta vs benchmark"""
@@ -131,6 +182,15 @@ class PerformanceMetrics:
         
         covariance = aligned_returns.cov().loc['strategy', 'benchmark']
         benchmark_variance = aligned_returns['benchmark'].var()
+        
+        # Ensure scalars
+        if isinstance(covariance, pd.Series):
+            covariance = covariance.iloc[0]
+        if isinstance(benchmark_variance, pd.Series):
+            benchmark_variance = benchmark_variance.iloc[0]
+        
+        covariance = float(covariance)
+        benchmark_variance = float(benchmark_variance)
         
         return covariance / benchmark_variance if benchmark_variance != 0 else None
     
@@ -167,11 +227,21 @@ class PerformanceMetrics:
         
         excess_returns = aligned_returns['strategy'] - aligned_returns['benchmark']
         tracking_error = excess_returns.std() * np.sqrt(self.trading_days)
+        excess_mean = excess_returns.mean() * self.trading_days
+        
+        # Ensure scalars
+        if isinstance(tracking_error, pd.Series):
+            tracking_error = tracking_error.iloc[0]
+        if isinstance(excess_mean, pd.Series):
+            excess_mean = excess_mean.iloc[0]
+        
+        tracking_error = float(tracking_error)
+        excess_mean = float(excess_mean)
         
         if tracking_error == 0:
             return None
         
-        return (excess_returns.mean() * self.trading_days) / tracking_error
+        return excess_mean / tracking_error
     
     def treynor_ratio(self) -> Optional[float]:
         """Calculate Treynor ratio"""

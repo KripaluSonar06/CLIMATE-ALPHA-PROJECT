@@ -21,6 +21,19 @@ class PerformanceMetrics:
             benchmark_returns: Series of benchmark returns (optional)
             risk_free_rate: Annual risk-free rate (default: 2%)
         """
+        # Handle DataFrame input - convert to Series
+        if isinstance(returns, pd.DataFrame):
+            if returns.shape[1] == 1:
+                returns = returns.iloc[:, 0]
+            else:
+                raise ValueError("PerformanceMetrics expects a Series or single-column DataFrame")
+        
+        if benchmark_returns is not None and isinstance(benchmark_returns, pd.DataFrame):
+            if benchmark_returns.shape[1] == 1:
+                benchmark_returns = benchmark_returns.iloc[:, 0]
+            else:
+                raise ValueError("benchmark_returns expects a Series or single-column DataFrame")
+        
         self.returns = returns
         self.benchmark_returns = benchmark_returns
         self.risk_free_rate = risk_free_rate
@@ -38,7 +51,12 @@ class PerformanceMetrics:
     
     def annualized_volatility(self) -> float:
         """Calculate annualized volatility"""
-        vol = self.returns.std() * np.sqrt(self.trading_days)
+        # Handle DataFrame
+        returns = self.returns
+        if isinstance(returns, pd.DataFrame):
+            returns = returns.iloc[:, 0]
+        
+        vol = returns.std() * np.sqrt(self.trading_days)
         if isinstance(vol, pd.Series):
             vol = vol.iloc[0]
         return float(vol)
@@ -69,8 +87,17 @@ class PerformanceMetrics:
     
     def max_drawdown(self) -> float:
         """Calculate maximum drawdown"""
-        # Force clean Series
-        returns = pd.Series(self.returns.values)
+        # Force clean 1D array
+        if isinstance(self.returns, pd.DataFrame):
+            values = self.returns.iloc[:, 0].values
+        else:
+            values = self.returns.values
+        
+        # Ensure 1D
+        if values.ndim > 1:
+            values = values.flatten()
+        
+        returns = pd.Series(values)
         
         cumulative = (1 + returns).cumprod()
         running_max = cumulative.expanding().max()
@@ -84,8 +111,17 @@ class PerformanceMetrics:
     
     def max_drawdown_duration(self) -> int:
         """Calculate maximum drawdown duration in days"""
-        # Force clean Series
-        returns = pd.Series(self.returns.values)
+        # Force clean 1D array
+        if isinstance(self.returns, pd.DataFrame):
+            values = self.returns.iloc[:, 0].values
+        else:
+            values = self.returns.values
+        
+        # Ensure 1D
+        if values.ndim > 1:
+            values = values.flatten()
+        
+        returns = pd.Series(values)
         
         cumulative = (1 + returns).cumprod()
         running_max = cumulative.expanding().max()

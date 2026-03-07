@@ -68,15 +68,15 @@ class DataCollector:
                 
                 if not data.empty:
                     all_data[ticker] = data
-                    logger.info(f"✓ {ticker}: {len(data)} rows")
+                    logger.info(f" {ticker}: {len(data)} rows")
                 else:
-                    logger.warning(f"✗ {ticker}: No data returned")
+                    logger.warning(f" {ticker}: No data returned")
                 
                 # Rate limiting
                 time.sleep(0.1)
                 
             except Exception as e:
-                logger.error(f"✗ {ticker}: Error - {str(e)}")
+                logger.error(f" {ticker}: Error - {str(e)}")
         
         # Combine all data
         if all_data:
@@ -262,7 +262,7 @@ if __name__ == "__main__":
     # Download full universe
     data = collector.download_full_universe(
         start_date="2019-01-01",
-        end_date="2024-12-31"
+        end_date="2025-12-31"
     )
     
     print(f"\nDownloaded data shape: {data.shape}")

@@ -31,7 +31,7 @@ class FeatureEngineer:
         result = df.copy()
         
         # Simple Moving Averages
-        result['sma_20'] = ta.trend.sma_indicator(df['Close'], window=20)
+        result['sma_20'] = ta.trend.sma_indicator(df['Close'], window=20) ##
         result['sma_50'] = ta.trend.sma_indicator(df['Close'], window=50)
         result['sma_200'] = ta.trend.sma_indicator(df['Close'], window=200)
         

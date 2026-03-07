@@ -30,40 +30,26 @@ class FeatureEngineer:
         
         result = df.copy()
         
-        # Helper function to get Series from potentially multi-indexed column
-        def get_series(col_name):
-            col = df[col_name]
-            if isinstance(col, pd.DataFrame):
-                return col.iloc[:, 0]  # Get first column if it's a DataFrame
-            return col.squeeze() if hasattr(col, 'squeeze') else col
-        
-        # Get price series
-        close = get_series('Close')
-        high = get_series('High')
-        low = get_series('Low')
-        open_price = get_series('Open')
-        volume = get_series('Volume')
-        
         # Simple Moving Averages
-        result['sma_20'] = ta.trend.sma_indicator(close, window=20)
-        result['sma_50'] = ta.trend.sma_indicator(close, window=50)
-        result['sma_200'] = ta.trend.sma_indicator(close, window=200)
+        result['sma_20'] = ta.trend.sma_indicator(df['Close'], window=20)
+        result['sma_50'] = ta.trend.sma_indicator(df['Close'], window=50)
+        result['sma_200'] = ta.trend.sma_indicator(df['Close'], window=200)
         
         # Exponential Moving Averages
-        result['ema_12'] = ta.trend.ema_indicator(close, window=12)
-        result['ema_26'] = ta.trend.ema_indicator(close, window=26)
+        result['ema_12'] = ta.trend.ema_indicator(df['Close'], window=12)
+        result['ema_26'] = ta.trend.ema_indicator(df['Close'], window=26)
         
         # MACD
-        macd = ta.trend.MACD(close)
+        macd = ta.trend.MACD(df['Close'])
         result['macd'] = macd.macd()
         result['macd_signal'] = macd.macd_signal()
         result['macd_diff'] = macd.macd_diff()
         
         # RSI
-        result['rsi_14'] = ta.momentum.rsi(close, window=14)
+        result['rsi_14'] = ta.momentum.rsi(df['Close'], window=14)
         
         # Bollinger Bands
-        bollinger = ta.volatility.BollingerBands(close)
+        bollinger = ta.volatility.BollingerBands(df['Close'])
         result['bb_high'] = bollinger.bollinger_hband()
         result['bb_mid'] = bollinger.bollinger_mavg()
         result['bb_low'] = bollinger.bollinger_lband()
@@ -71,31 +57,31 @@ class FeatureEngineer:
         
         # ATR (Average True Range)
         result['atr_14'] = ta.volatility.average_true_range(
-            high, low, close, window=14
+            df['High'], df['Low'], df['Close'], window=14
         )
         
         # ADX (Average Directional Index)
-        result['adx_14'] = ta.trend.adx(high, low, close, window=14)
+        result['adx_14'] = ta.trend.adx(df['High'], df['Low'], df['Close'], window=14)
         
         # Stochastic Oscillator
-        stoch = ta.momentum.StochasticOscillator(high, low, close)
+        stoch = ta.momentum.StochasticOscillator(df['High'], df['Low'], df['Close'])
         result['stoch_k'] = stoch.stoch()
         result['stoch_d'] = stoch.stoch_signal()
         
         # On-Balance Volume
-        result['obv'] = ta.volume.on_balance_volume(close, volume)
+        result['obv'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
         
         # Money Flow Index
         result['mfi_14'] = ta.volume.money_flow_index(
-            high, low, close, volume, window=14
+            df['High'], df['Low'], df['Close'], df['Volume'], window=14
         )
         
         # Commodity Channel Index
-        result['cci_20'] = ta.trend.cci(high, low, close, window=20)
+        result['cci_20'] = ta.trend.cci(df['High'], df['Low'], df['Close'], window=20)
         
         # Williams %R
         result['williams_r'] = ta.momentum.williams_r(
-            high, low, close, lbp=14
+            df['High'], df['Low'], df['Close'], lbp=14
         )
         
         logger.info(f"Added {len(result.columns) - len(df.columns)} technical features")
@@ -116,21 +102,9 @@ class FeatureEngineer:
         
         result = df.copy()
         
-        # Helper function to get Series
-        def get_series(col_name):
-            col = df[col_name]
-            if isinstance(col, pd.DataFrame):
-                return col.iloc[:, 0]
-            return col.squeeze() if hasattr(col, 'squeeze') else col
-        
-        close = get_series('Close')
-        high = get_series('High')
-        low = get_series('Low')
-        open_price = get_series('Open')
-        
         # Returns
-        result['returns'] = close.pct_change()
-        result['log_returns'] = np.log(close / close.shift(1))
+        result['returns'] = df['Close'].pct_change()
+        result['log_returns'] = np.log(df['Close'] / df['Close'].shift(1))
         
         # Lagged returns
         for lag in [1, 2, 3, 5, 10]:
@@ -138,25 +112,25 @@ class FeatureEngineer:
         
         # Rolling statistics
         for window in [5, 10, 20, 60]:
-            result[f'rolling_mean_{window}'] = close.rolling(window).mean()
-            result[f'rolling_std_{window}'] = close.rolling(window).std()
-            result[f'rolling_min_{window}'] = close.rolling(window).min()
-            result[f'rolling_max_{window}'] = close.rolling(window).max()
+            result[f'rolling_mean_{window}'] = df['Close'].rolling(window).mean()
+            result[f'rolling_std_{window}'] = df['Close'].rolling(window).std()
+            result[f'rolling_min_{window}'] = df['Close'].rolling(window).min()
+            result[f'rolling_max_{window}'] = df['Close'].rolling(window).max()
         
         # Price momentum
-        result['momentum_5'] = close / close.shift(5) - 1
-        result['momentum_10'] = close / close.shift(10) - 1
-        result['momentum_20'] = close / close.shift(20) - 1
-        result['momentum_60'] = close / close.shift(60) - 1
+        result['momentum_5'] = df['Close'] / df['Close'].shift(5) - 1
+        result['momentum_10'] = df['Close'] / df['Close'].shift(10) - 1
+        result['momentum_20'] = df['Close'] / df['Close'].shift(20) - 1
+        result['momentum_60'] = df['Close'] / df['Close'].shift(60) - 1
         
         # Distance from moving averages
-        result['dist_sma_20'] = (close - result['sma_20']) / result['sma_20']
-        result['dist_sma_50'] = (close - result['sma_50']) / result['sma_50']
-        result['dist_sma_200'] = (close - result['sma_200']) / result['sma_200']
+        result['dist_sma_20'] = (df['Close'] - result['sma_20']) / result['sma_20']
+        result['dist_sma_50'] = (df['Close'] - result['sma_50']) / result['sma_50']
+        result['dist_sma_200'] = (df['Close'] - result['sma_200']) / result['sma_200']
         
         # High-Low range
-        result['high_low_range'] = (high - low) / close
-        result['close_open_range'] = (close - open_price) / open_price
+        result['high_low_range'] = (df['High'] - df['Low']) / df['Close']
+        result['close_open_range'] = (df['Close'] - df['Open']) / df['Open']
         
         logger.info(f"Added price features")
         
@@ -176,26 +150,16 @@ class FeatureEngineer:
         
         result = df.copy()
         
-        # Helper function to get Series
-        def get_series(col_name):
-            col = df[col_name]
-            if isinstance(col, pd.DataFrame):
-                return col.iloc[:, 0]
-            return col.squeeze() if hasattr(col, 'squeeze') else col
-        
-        close = get_series('Close')
-        volume = get_series('Volume')
-        
         # Volume ratios
-        result['volume_ratio_5'] = volume / volume.rolling(5).mean()
-        result['volume_ratio_10'] = volume / volume.rolling(10).mean()
-        result['volume_ratio_20'] = volume / volume.rolling(20).mean()
+        result['volume_ratio_5'] = df['Volume'] / df['Volume'].rolling(5).mean()
+        result['volume_ratio_10'] = df['Volume'] / df['Volume'].rolling(10).mean()
+        result['volume_ratio_20'] = df['Volume'] / df['Volume'].rolling(20).mean()
         
         # Volume change
-        result['volume_change'] = volume.pct_change()
+        result['volume_change'] = df['Volume'].pct_change()
         
         # Price-Volume correlation
-        result['price_volume_corr_20'] = close.rolling(20).corr(volume)
+        result['price_volume_corr_20'] = df['Close'].rolling(20).corr(df['Volume'])
         
         logger.info(f"Added volume features")
         
@@ -215,22 +179,8 @@ class FeatureEngineer:
         
         result = df.copy()
         
-        # Helper function to get Series
-        def get_series(col_name):
-            if col_name in df.columns:
-                col = df[col_name]
-                if isinstance(col, pd.DataFrame):
-                    return col.iloc[:, 0]
-                return col.squeeze() if hasattr(col, 'squeeze') else col
-            return None
-        
-        close = get_series('Close')
-        high = get_series('High')
-        low = get_series('Low')
-        open_price = get_series('Open')
-        
         if 'returns' not in result.columns:
-            result['returns'] = close.pct_change()
+            result['returns'] = df['Close'].pct_change()
         
         # Historical volatility
         for window in [5, 10, 20, 60]:
@@ -239,13 +189,13 @@ class FeatureEngineer:
         # Parkinson volatility (using High-Low)
         result['parkinson_vol_20'] = np.sqrt(
             (1 / (4 * np.log(2))) * 
-            ((np.log(high / low) ** 2).rolling(20).mean())
+            ((np.log(df['High'] / df['Low']) ** 2).rolling(20).mean())
         )
         
         # Garman-Klass volatility
         result['gk_vol_20'] = np.sqrt(
-            0.5 * (np.log(high / low) ** 2).rolling(20).mean() -
-            (2 * np.log(2) - 1) * (np.log(close / open_price) ** 2).rolling(20).mean()
+            0.5 * (np.log(df['High'] / df['Low']) ** 2).rolling(20).mean() -
+            (2 * np.log(2) - 1) * (np.log(df['Close'] / df['Open']) ** 2).rolling(20).mean()
         )
         
         logger.info(f"Added volatility features")
@@ -266,29 +216,20 @@ class FeatureEngineer:
         
         result = df.copy()
         
-        # Helper function to get Series
-        def get_series(col_name):
-            col = df[col_name]
-            if isinstance(col, pd.DataFrame):
-                return col.iloc[:, 0]
-            return col.squeeze() if hasattr(col, 'squeeze') else col
-        
-        close = get_series('Close')
-        high = get_series('High')
-        low = get_series('Low')
-        
         # ROC (Rate of Change)
         for period in [5, 10, 20, 60]:
-            result[f'roc_{period}'] = ta.momentum.roc(close, window=period)
+            result[f'roc_{period}'] = ta.momentum.roc(df['Close'], window=period)
         
         # TSI (True Strength Index)
-        result['tsi'] = ta.momentum.tsi(close)
+        result['tsi'] = ta.momentum.tsi(df['Close'])
         
         # Ultimate Oscillator
-        result['uo'] = ta.momentum.ultimate_oscillator(high, low, close)
+        result['uo'] = ta.momentum.ultimate_oscillator(
+            df['High'], df['Low'], df['Close']
+        )
         
         # Awesome Oscillator
-        result['ao'] = ta.momentum.awesome_oscillator(high, low)
+        result['ao'] = ta.momentum.awesome_oscillator(df['High'], df['Low'])
         
         logger.info(f"Added momentum features")
         

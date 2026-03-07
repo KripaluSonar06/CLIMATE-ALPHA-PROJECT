@@ -68,9 +68,9 @@ class DataCollector:
                 
                 if not data.empty:
                     all_data[ticker] = data
-                    logger.info(f" {ticker}: {len(data)} rows")
+                    logger.info(f"{ticker}: {len(data)} rows")
                 else:
-                    logger.warning(f" {ticker}: No data returned")
+                    logger.warning(f"{ticker}: No data returned")
                 
                 # Rate limiting
                 time.sleep(0.1)

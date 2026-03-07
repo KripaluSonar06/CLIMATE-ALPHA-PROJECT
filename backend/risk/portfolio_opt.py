@@ -63,46 +63,73 @@ class PortfolioOptimizer:
         expected_returns, cov_matrix = self.calculate_returns_cov(returns)
         n_assets = len(expected_returns)
         
-        # Define optimization variables
-        weights = cp.Variable(n_assets)
-        
-        # Define portfolio return and risk
-        portfolio_return = expected_returns @ weights
-        portfolio_risk = cp.quad_form(weights, cov_matrix)
-        
-        # Constraints
-        constraints = [
-            cp.sum(weights) == 1,  # Weights sum to 1
-            weights >= min_weight,  # Min weight
-            weights <= max_weight   # Max weight
-        ]
-        
         if target_return is not None:
-            # Minimize risk for target return
-            constraints.append(portfolio_return >= target_return)
+            # Use CVXPY to minimize risk for target return (convex problem)
+            weights = cp.Variable(n_assets)
+            portfolio_return = expected_returns @ weights
+            portfolio_risk = cp.quad_form(weights, cov_matrix)
+            
+            constraints = [
+                cp.sum(weights) == 1,
+                weights >= min_weight,
+                weights <= max_weight,
+                portfolio_return >= target_return
+            ]
+            
             objective = cp.Minimize(portfolio_risk)
+            problem = cp.Problem(objective, constraints)
+            problem.solve()
+            
+            if weights.value is None:
+                logger.error("Optimization failed")
+                return {}
+            
+            optimal_weights = weights.value
+            
         else:
-            # Maximize Sharpe ratio (equivalent to maximizing return for unit risk)
-            objective = cp.Maximize(
-                (portfolio_return - self.risk_free_rate) / cp.sqrt(portfolio_risk)
+            # Use scipy to maximize Sharpe ratio (non-convex problem)
+            def neg_sharpe_ratio(weights):
+                """Negative Sharpe ratio (for minimization)"""
+                portfolio_ret = expected_returns @ weights
+                portfolio_vol = np.sqrt(weights @ cov_matrix @ weights)
+                sharpe = (portfolio_ret - self.risk_free_rate) / portfolio_vol
+                return -sharpe  # Negative because we minimize
+            
+            # Constraints for scipy
+            constraints = {
+                'type': 'eq',
+                'fun': lambda w: np.sum(w) - 1  # Weights sum to 1
+            }
+            
+            bounds = tuple((min_weight, max_weight) for _ in range(n_assets))
+            
+            # Initial guess: equal weights
+            x0 = np.ones(n_assets) / n_assets
+            
+            # Optimize
+            result = minimize(
+                neg_sharpe_ratio,
+                x0,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints,
+                options={'maxiter': 1000}
             )
+            
+            if not result.success:
+                logger.error(f"Optimization failed: {result.message}")
+                return {}
+            
+            optimal_weights = result.x
         
-        # Solve
-        problem = cp.Problem(objective, constraints)
-        problem.solve()
-        
-        if weights.value is None:
-            logger.error("Optimization failed")
-            return {}
-        
-        # Results
-        optimal_weights = pd.Series(weights.value, index=returns.columns)
-        portfolio_ret = expected_returns @ weights.value
-        portfolio_vol = np.sqrt(portfolio_risk.value)
+        # Calculate final metrics
+        optimal_weights_series = pd.Series(optimal_weights, index=returns.columns)
+        portfolio_ret = expected_returns @ optimal_weights
+        portfolio_vol = np.sqrt(optimal_weights @ cov_matrix @ optimal_weights)
         sharpe = (portfolio_ret - self.risk_free_rate) / portfolio_vol
         
         results = {
-            'weights': optimal_weights,
+            'weights': optimal_weights_series,
             'expected_return': portfolio_ret,
             'volatility': portfolio_vol,
             'sharpe_ratio': sharpe
@@ -270,27 +297,38 @@ class PortfolioOptimizer:
             bl_cov = np.linalg.inv(bl_cov_inv)
             bl_returns = bl_cov @ (inv_tau_sigma @ pi + P.T @ inv_omega @ Q)
         
-        # Optimize using BL returns
-        weights = cp.Variable(n_assets)
-        portfolio_return = bl_returns @ weights
-        portfolio_risk = cp.quad_form(weights, cov_matrix)
+        # Optimize using scipy (to maximize Sharpe ratio)
+        def neg_sharpe_ratio(weights):
+            """Negative Sharpe ratio (for minimization)"""
+            portfolio_ret = bl_returns @ weights
+            portfolio_vol = np.sqrt(weights @ cov_matrix @ weights)
+            sharpe = (portfolio_ret - self.risk_free_rate) / portfolio_vol
+            return -sharpe
         
-        constraints = [
-            cp.sum(weights) == 1,
-            weights >= 0,
-            weights <= 1
-        ]
+        constraints = {
+            'type': 'eq',
+            'fun': lambda w: np.sum(w) - 1
+        }
         
-        objective = cp.Maximize(
-            (portfolio_return - self.risk_free_rate) / cp.sqrt(portfolio_risk)
+        bounds = tuple((0, 1) for _ in range(n_assets))
+        x0 = np.ones(n_assets) / n_assets
+        
+        result = minimize(
+            neg_sharpe_ratio,
+            x0,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=constraints,
+            options={'maxiter': 1000}
         )
         
-        problem = cp.Problem(objective, constraints)
-        problem.solve()
+        if not result.success:
+            logger.error(f"Optimization failed: {result.message}")
+            return {}
         
-        optimal_weights = pd.Series(weights.value, index=returns.columns)
-        portfolio_ret = bl_returns @ weights.value
-        portfolio_vol = np.sqrt(portfolio_risk.value)
+        optimal_weights = pd.Series(result.x, index=returns.columns)
+        portfolio_ret = bl_returns @ result.x
+        portfolio_vol = np.sqrt(result.x @ cov_matrix @ result.x)
         sharpe = (portfolio_ret - self.risk_free_rate) / portfolio_vol
         
         results = {
@@ -329,38 +367,142 @@ class PortfolioOptimizer:
         # Align ESG scores with returns
         aligned_scores = esg_scores.reindex(returns.columns).fillna(0)
         
-        # Optimization
-        weights = cp.Variable(n_assets)
-        portfolio_return = expected_returns @ weights
-        portfolio_risk = cp.quad_form(weights, cov_matrix)
-        portfolio_esg = aligned_scores.values @ weights
+        # Check if constraint is feasible
+        max_possible_esg = aligned_scores.max()
+        min_possible_esg = aligned_scores.min()
         
+        if min_esg_score > max_possible_esg:
+            logger.error(f"ESG constraint {min_esg_score} is higher than maximum possible {max_possible_esg}")
+            # Return equal weight portfolio as fallback
+            weights = np.ones(n_assets) / n_assets
+            optimal_weights = pd.Series(weights, index=returns.columns)
+            portfolio_ret = expected_returns @ weights
+            portfolio_vol = np.sqrt(weights @ cov_matrix @ weights)
+            sharpe = (portfolio_ret - self.risk_free_rate) / portfolio_vol
+            portfolio_esg_score = aligned_scores.values @ weights
+            
+            return {
+                'weights': optimal_weights,
+                'expected_return': portfolio_ret,
+                'volatility': portfolio_vol,
+                'sharpe_ratio': sharpe,
+                'esg_score': portfolio_esg_score,
+                'status': 'fallback_equal_weight'
+            }
+        
+        # Use scipy to maximize Sharpe ratio with ESG constraint
+        def neg_sharpe_ratio(weights):
+            """Negative Sharpe ratio (for minimization)"""
+            portfolio_ret = expected_returns @ weights
+            portfolio_vol = np.sqrt(weights @ cov_matrix @ weights)
+            if portfolio_vol == 0:
+                return 1e10
+            sharpe = (portfolio_ret - self.risk_free_rate) / portfolio_vol
+            return -sharpe
+        
+        # Constraints
         constraints = [
-            cp.sum(weights) == 1,
-            weights >= 0,
-            weights <= 1,
-            portfolio_esg >= min_esg_score  # ESG constraint
+            {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},  # Weights sum to 1
+            {'type': 'ineq', 'fun': lambda w: aligned_scores.values @ w - min_esg_score}  # ESG constraint
         ]
         
-        objective = cp.Maximize(
-            (portfolio_return - self.risk_free_rate) / cp.sqrt(portfolio_risk)
-        )
+        bounds = tuple((0, 1) for _ in range(n_assets))
         
-        problem = cp.Problem(objective, constraints)
-        problem.solve()
+        # Try multiple initial guesses
+        initial_guesses = [
+            np.ones(n_assets) / n_assets,  # Equal weight
+            aligned_scores.values / aligned_scores.sum(),  # ESG-weighted
+            expected_returns / expected_returns.sum() if expected_returns.sum() > 0 else np.ones(n_assets) / n_assets  # Return-weighted
+        ]
         
-        optimal_weights = pd.Series(weights.value, index=returns.columns)
-        portfolio_ret = expected_returns @ weights.value
-        portfolio_vol = np.sqrt(portfolio_risk.value)
+        best_result = None
+        best_sharpe = -np.inf
+        
+        for x0 in initial_guesses:
+            # Normalize initial guess
+            x0 = np.abs(x0) / np.sum(np.abs(x0))
+            
+            try:
+                result = minimize(
+                    neg_sharpe_ratio,
+                    x0,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=constraints,
+                    options={'maxiter': 1000, 'ftol': 1e-9}
+                )
+                
+                if result.success:
+                    sharpe = -result.fun
+                    if sharpe > best_sharpe:
+                        best_sharpe = sharpe
+                        best_result = result
+                        
+            except Exception as e:
+                logger.debug(f"Optimization attempt failed: {str(e)}")
+                continue
+        
+        # If all attempts failed, try with relaxed tolerance
+        if best_result is None or not best_result.success:
+            logger.warning("Standard optimization failed, trying with relaxed constraints...")
+            
+            # Try L-BFGS-B which is more robust
+            try:
+                # For L-BFGS-B, we need to handle constraints differently
+                def objective_with_penalty(weights):
+                    """Objective with penalty for constraint violation"""
+                    neg_sharpe = neg_sharpe_ratio(weights)
+                    
+                    # Penalty for ESG constraint violation
+                    esg_score = aligned_scores.values @ weights
+                    esg_penalty = 1000 * max(0, min_esg_score - esg_score)**2
+                    
+                    # Penalty for weight sum constraint
+                    sum_penalty = 1000 * (np.sum(weights) - 1)**2
+                    
+                    return neg_sharpe + esg_penalty + sum_penalty
+                
+                result = minimize(
+                    objective_with_penalty,
+                    np.ones(n_assets) / n_assets,
+                    method='L-BFGS-B',
+                    bounds=bounds,
+                    options={'maxiter': 1000}
+                )
+                
+                # Normalize weights to sum to 1
+                weights = result.x / result.x.sum()
+                best_result = result
+                best_result.x = weights
+                
+            except Exception as e:
+                logger.error(f"All optimization attempts failed: {str(e)}")
+                return {}
+        
+        if best_result is None:
+            logger.error("Optimization failed: Could not find valid solution")
+            return {}
+        
+        # Normalize weights (ensure they sum to exactly 1)
+        weights = best_result.x / best_result.x.sum()
+        
+        optimal_weights = pd.Series(weights, index=returns.columns)
+        portfolio_ret = expected_returns @ weights
+        portfolio_vol = np.sqrt(weights @ cov_matrix @ weights)
         sharpe = (portfolio_ret - self.risk_free_rate) / portfolio_vol
-        portfolio_esg_score = aligned_scores.values @ weights.value
+        portfolio_esg_score = aligned_scores.values @ weights
+        
+        # Verify ESG constraint is satisfied
+        if portfolio_esg_score < min_esg_score - 0.01:  # Small tolerance
+            logger.warning(f"ESG constraint not fully satisfied: {portfolio_esg_score:.2f} < {min_esg_score}")
         
         results = {
             'weights': optimal_weights,
             'expected_return': portfolio_ret,
             'volatility': portfolio_vol,
             'sharpe_ratio': sharpe,
-            'esg_score': portfolio_esg_score
+            'esg_score': portfolio_esg_score,
+            'status': 'success'
         }
         
         logger.info(f"ESG portfolio: Return={portfolio_ret:.2%}, Vol={portfolio_vol:.2%}, "

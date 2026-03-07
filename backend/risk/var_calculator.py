@@ -39,11 +39,22 @@ class RiskCalculator:
         if confidence is None:
             confidence = self.confidence_level
         
+        # Handle DataFrame input
+        if isinstance(returns, pd.DataFrame):
+            if returns.shape[1] == 1:
+                returns = returns.iloc[:, 0]
+            else:
+                raise ValueError("historical_var expects a Series, not a multi-column DataFrame")
+        
         var = -np.percentile(returns.dropna(), (1 - confidence) * 100)
+        
+        # Ensure it's a scalar
+        if isinstance(var, (pd.Series, np.ndarray)):
+            var = float(var.item() if hasattr(var, 'item') else var[0])
         
         logger.debug(f"Historical VaR ({confidence:.0%}): {var:.4f}")
         
-        return var
+        return float(var)
     
     def parametric_var(self,
                       returns: pd.Series,
@@ -61,8 +72,21 @@ class RiskCalculator:
         if confidence is None:
             confidence = self.confidence_level
         
+        # Handle DataFrame input
+        if isinstance(returns, pd.DataFrame):
+            if returns.shape[1] == 1:
+                returns = returns.iloc[:, 0]
+            else:
+                raise ValueError("parametric_var expects a Series, not a multi-column DataFrame")
+        
         mean = returns.mean()
         std = returns.std()
+        
+        # Ensure they're scalars
+        if isinstance(mean, pd.Series):
+            mean = mean.iloc[0]
+        if isinstance(std, pd.Series):
+            std = std.iloc[0]
         
         # Z-score for confidence level
         z_score = stats.norm.ppf(1 - confidence)
@@ -71,7 +95,7 @@ class RiskCalculator:
         
         logger.debug(f"Parametric VaR ({confidence:.0%}): {var:.4f}")
         
-        return var
+        return float(var)
     
     def monte_carlo_var(self,
                        returns: pd.Series,
@@ -97,6 +121,12 @@ class RiskCalculator:
         mean = returns.mean()
         std = returns.std()
         
+        # Ensure they're scalars
+        if isinstance(mean, pd.Series):
+            mean = mean.iloc[0]
+        if isinstance(std, pd.Series):
+            std = std.iloc[0]
+        
         # Generate random scenarios
         simulated_returns = np.random.normal(
             mean * horizon,
@@ -109,7 +139,7 @@ class RiskCalculator:
         
         logger.debug(f"Monte Carlo VaR ({confidence:.0%}, {horizon}d): {var:.4f}")
         
-        return var
+        return float(var)
     
     def conditional_var(self,
                        returns: pd.Series,
@@ -127,14 +157,29 @@ class RiskCalculator:
         if confidence is None:
             confidence = self.confidence_level
         
+        # Handle DataFrame input
+        if isinstance(returns, pd.DataFrame):
+            if returns.shape[1] == 1:
+                returns = returns.iloc[:, 0]
+            else:
+                raise ValueError("conditional_var expects a Series, not a multi-column DataFrame")
+        
         var = self.historical_var(returns, confidence)
         
         # Average of losses beyond VaR
-        cvar = -returns[returns <= -var].mean()
+        tail_losses = returns[returns <= -var]
+        
+        if len(tail_losses) == 0:
+            cvar = var  # If no losses beyond VaR, use VaR itself
+        else:
+            cvar = -tail_losses.mean()
+            # Ensure it's a scalar
+            if isinstance(cvar, pd.Series):
+                cvar = cvar.iloc[0]
         
         logger.debug(f"Conditional VaR ({confidence:.0%}): {cvar:.4f}")
         
-        return cvar
+        return float(cvar)
     
     def calculate_all_var(self, returns: pd.Series,
                          confidence_levels: List[float] = [0.95, 0.99]) -> pd.DataFrame:
@@ -305,24 +350,46 @@ class RiskCalculator:
         Returns:
             Tuple of (max_drawdown, duration_days)
         """
+        # Force conversion to clean numpy array and back to Series
+        if isinstance(returns, pd.DataFrame):
+            if returns.shape[1] == 1:
+                values = returns.iloc[:, 0].values
+            else:
+                raise ValueError("maximum_drawdown expects a Series, not a multi-column DataFrame")
+        else:
+            values = returns.values
+        
+        # Create clean Series without any metadata
+        clean_returns = pd.Series(values)
+        
         # Cumulative returns
-        cumulative = (1 + returns).cumprod()
+        cumulative = (1 + clean_returns).cumprod()
         
         # Running maximum
         running_max = cumulative.expanding().max()
         
-        # Drawdown
-        drawdown = (cumulative - running_max) / running_max
-        max_dd = drawdown.min()
+        # Drawdown as simple calculation
+        drawdown = (cumulative.values - running_max.values) / running_max.values
+        drawdown = pd.Series(drawdown)
         
-        # Duration
-        is_drawdown = drawdown < 0
-        drawdown_periods = is_drawdown.astype(int).groupby(
-            (is_drawdown != is_drawdown.shift()).cumsum()
-        ).sum()
-        max_duration = drawdown_periods.max() if len(drawdown_periods) > 0 else 0
+        # Maximum drawdown
+        max_dd = float(drawdown.min())
         
-        return max_dd, max_duration
+        # Calculate duration using simple logic
+        is_in_drawdown = (drawdown < 0).astype(int).values
+        
+        # Find consecutive drawdown periods
+        max_duration = 0
+        current_duration = 0
+        
+        for in_dd in is_in_drawdown:
+            if in_dd == 1:
+                current_duration += 1
+                max_duration = max(max_duration, current_duration)
+            else:
+                current_duration = 0
+        
+        return max_dd, int(max_duration)
     
     def downside_deviation(self,
                           returns: pd.Series,
@@ -340,11 +407,15 @@ class RiskCalculator:
         downside_returns = returns[returns < target]
         
         if len(downside_returns) == 0:
-            return 0
+            return 0.0
         
         downside_dev = downside_returns.std() * np.sqrt(self.trading_days)
         
-        return downside_dev
+        # Ensure it's a scalar
+        if isinstance(downside_dev, pd.Series):
+            downside_dev = downside_dev.iloc[0]
+        
+        return float(downside_dev)
     
     def tail_ratio(self, returns: pd.Series) -> float:
         """
@@ -359,9 +430,15 @@ class RiskCalculator:
         p95 = np.percentile(returns, 95)
         p5 = np.percentile(returns, 5)
         
+        # Ensure they're scalars
+        if isinstance(p95, (pd.Series, np.ndarray)):
+            p95 = float(p95.item() if hasattr(p95, 'item') else p95[0])
+        if isinstance(p5, (pd.Series, np.ndarray)):
+            p5 = float(p5.item() if hasattr(p5, 'item') else p5[0])
+        
         tail_ratio = abs(p95 / p5) if p5 != 0 else np.inf
         
-        return tail_ratio
+        return float(tail_ratio)
     
     def comprehensive_risk_report(self,
                                  returns: pd.Series,
@@ -378,6 +455,16 @@ class RiskCalculator:
         """
         logger.info("Generating comprehensive risk report...")
         
+        # Handle DataFrame input - convert to Series at the start
+        if isinstance(returns, pd.DataFrame):
+            if returns.shape[1] == 1:
+                returns = returns.iloc[:, 0]
+            else:
+                raise ValueError("comprehensive_risk_report expects a Series, not a multi-column DataFrame")
+        
+        # Ensure it's a clean Series
+        returns = pd.Series(returns.values, index=returns.index)
+        
         # VaR metrics
         var_95 = self.historical_var(returns, 0.95)
         var_99 = self.historical_var(returns, 0.99)
@@ -386,6 +473,9 @@ class RiskCalculator:
         
         # Volatility
         annual_vol = returns.std() * np.sqrt(self.trading_days)
+        if isinstance(annual_vol, pd.Series):
+            annual_vol = annual_vol.iloc[0]
+        annual_vol = float(annual_vol)
         
         # Drawdown
         max_dd, dd_duration = self.maximum_drawdown(returns)
@@ -394,23 +484,33 @@ class RiskCalculator:
         downside_dev = self.downside_deviation(returns)
         tail_r = self.tail_ratio(returns)
         
+        # Statistical moments
+        skewness = stats.skew(returns.dropna())
+        kurtosis = stats.kurtosis(returns.dropna())
+        
+        # Ensure all are scalars
+        if isinstance(skewness, (pd.Series, np.ndarray)):
+            skewness = float(skewness.item() if hasattr(skewness, 'item') else skewness[0])
+        if isinstance(kurtosis, (pd.Series, np.ndarray)):
+            kurtosis = float(kurtosis.item() if hasattr(kurtosis, 'item') else kurtosis[0])
+        
         report = {
-            'portfolio_value': portfolio_value,
+            'portfolio_value': float(portfolio_value),
             'annual_volatility': annual_vol,
-            'var_95_pct': var_95,
-            'var_95_dollar': var_95 * portfolio_value,
-            'var_99_pct': var_99,
-            'var_99_dollar': var_99 * portfolio_value,
-            'cvar_95_pct': cvar_95,
-            'cvar_95_dollar': cvar_95 * portfolio_value,
-            'cvar_99_pct': cvar_99,
-            'cvar_99_dollar': cvar_99 * portfolio_value,
-            'max_drawdown': max_dd,
-            'max_dd_duration': dd_duration,
-            'downside_deviation': downside_dev,
-            'tail_ratio': tail_r,
-            'skewness': stats.skew(returns.dropna()),
-            'kurtosis': stats.kurtosis(returns.dropna())
+            'var_95_pct': float(var_95),
+            'var_95_dollar': float(var_95 * portfolio_value),
+            'var_99_pct': float(var_99),
+            'var_99_dollar': float(var_99 * portfolio_value),
+            'cvar_95_pct': float(cvar_95),
+            'cvar_95_dollar': float(cvar_95 * portfolio_value),
+            'cvar_99_pct': float(cvar_99),
+            'cvar_99_dollar': float(cvar_99 * portfolio_value),
+            'max_drawdown': float(max_dd),
+            'max_dd_duration': int(dd_duration),
+            'downside_deviation': float(downside_dev),
+            'tail_ratio': float(tail_r),
+            'skewness': float(skewness),
+            'kurtosis': float(kurtosis)
         }
         
         logger.info("Risk report complete")

@@ -72,7 +72,7 @@ class PairsTradingStrategy:
                 
                 if p_value < significance:
                     pairs.append((ticker1, ticker2, p_value))
-                    logger.info(f"✓ Cointegrated pair found: {ticker1} - {ticker2} (p={p_value:.4f})")
+                    logger.info(f"Cointegrated pair found: {ticker1} - {ticker2} (p={p_value:.4f})")
         
         logger.info(f"Found {len(pairs)} cointegrated pairs")
         

@@ -134,6 +134,17 @@ class StrategyEngine:
         Returns:
             Regime multiplier (0.5 in bear/high vol, 1.0 in bull)
         """
+        # Handle DataFrame input
+        if isinstance(returns, pd.DataFrame):
+            if returns.shape[1] == 1:
+                returns = returns.iloc[:, 0]
+            else:
+                returns = returns.mean(axis=1)
+        
+        # Ensure clean Series with no multi-index
+        if hasattr(returns, 'values'):
+            returns = pd.Series(returns.values, index=returns.index)
+        
         rolling_return = returns.rolling(lookback).mean() * 252  # Annualized
         rolling_vol = returns.rolling(lookback).std() * np.sqrt(252)
         
@@ -143,9 +154,12 @@ class StrategyEngine:
         # High volatility: reduce exposure
         high_vol = rolling_vol > rolling_vol.quantile(0.75)
         
-        # Regime multiplier
+        # Create regime multiplier
         regime_multiplier = pd.Series(1.0, index=returns.index)
-        regime_multiplier[~bull_market | high_vol] = 0.5
+        
+        # Use .loc for safe boolean indexing
+        bearish_or_high_vol = (~bull_market | high_vol).fillna(False)
+        regime_multiplier.loc[bearish_or_high_vol] = 0.5
         
         return regime_multiplier
     
@@ -219,6 +233,16 @@ class StrategyEngine:
             Dictionary with portfolio metrics and returns
         """
         logger.info("Creating enhanced portfolio...")
+        
+        # Clean benchmark returns if provided
+        if benchmark_returns is not None:
+            if isinstance(benchmark_returns, pd.DataFrame):
+                if benchmark_returns.shape[1] == 1:
+                    benchmark_returns = benchmark_returns.iloc[:, 0]
+                else:
+                    benchmark_returns = benchmark_returns.mean(axis=1)
+            # Ensure clean Series
+            benchmark_returns = pd.Series(benchmark_returns.values, index=benchmark_returns.index)
         
         # Calculate returns
         returns = prices.pct_change().dropna()
